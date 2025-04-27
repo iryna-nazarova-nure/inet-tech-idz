@@ -9,20 +9,30 @@ $options = [
 
 try {
     $pdo = new PDO($dsn, $username, $password, $options);
-    
-    // Create logs table if it doesn't exist
-    $pdo->exec("CREATE TABLE IF NOT EXISTS logs (
-        id INTEGER PRIMARY KEY AUTO_INCREMENT,
-        action TEXT NOT NULL,
-        parameters TEXT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-    )");
 } catch (PDOException $e) {
     die("Помилка підключення до бази даних: " . $e->getMessage());
 }
 
-function log_request(PDO $pdo, string $action, array $params = []) {
-    $stmt = $pdo->prepare("INSERT INTO logs (action, parameters) VALUES (:action, :params)");
+try {
+
+    // Database should have following schema
+    //
+    // CREATE TABLE IF NOT EXISTS logs (
+    //     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    //     action TEXT NOT NULL,
+    //     parameters TEXT,
+    //     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    // )
+
+    $logPdo = new PDO('sqlite:./logs.db');
+} catch (PDOException $e) {
+    die("Помилка підключення до log бази даних: " . $e->getMessage());
+}
+
+$logPdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+function log_request(PDO $logPdo, string $action, array $params = []) {
+    $stmt = $logPdo->prepare("INSERT INTO logs (action, parameters) VALUES (:action, :params)");
     $stmt->execute([
         'action' => $action,
         'params' => json_encode($params, JSON_UNESCAPED_UNICODE)
@@ -37,7 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     // To get a JSONP, go to
     // http://localhost:8083/?action=income_jsonp&date=2014-10-27
     if ($action === 'income_jsonp') {
-        log_request($pdo, 'income_jsonp', ['date' => $date]);
+        log_request($logPdo, 'income_jsonp', ['date' => $date]);
 
         $query = "SELECT SUM(Cost) AS total_income FROM rent WHERE Date_end <= :date";
         $stmt = $pdo->prepare($query);
@@ -57,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     
     if ($action === 'cars_by_vendor') {
-        log_request($pdo, 'cars_by_vendor', ['vendor' => $vendor]);
+        log_request($logPdo, 'cars_by_vendor', ['vendor' => $vendor]);
 
         $query = "SELECT cars.* FROM cars JOIN vendors ON cars.FID_Vendors = vendors.ID_Vendors WHERE vendors.Name = :vendor";
         $stmt = $pdo->prepare($query);
@@ -74,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Content-Type: application/xml');
         echo $xml->asXML();
     } elseif ($action === 'available_cars') {
-        log_request($pdo, 'available_cars', ['date' => $date]);
+        log_request($logPdo, 'available_cars', ['date' => $date]);
 
         $query = "SELECT * FROM cars WHERE ID_Cars NOT IN (SELECT FID_Car FROM rent WHERE :date BETWEEN Date_start AND Date_end)";
         $stmt = $pdo->prepare($query);
@@ -201,7 +211,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </tr>
 
         <?php 
-        $logStmt = $pdo->query("SELECT * FROM logs ORDER BY id DESC");
+        $logStmt = $logPdo->query("SELECT * FROM logs ORDER BY id DESC");
         $logs = $logStmt->fetchAll();
         ?>
 
